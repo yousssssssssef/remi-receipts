@@ -1,0 +1,7 @@
+paddlepaddle==3.3.1
+paddleocr==3.7.0
+pydantic==2.14.1
+pillow
+pillow-heif==1.8.1
+# Only needed for the optional --parser claude mode
+anthropic==2.3.0

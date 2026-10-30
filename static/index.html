@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Receipt Scanner</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --text: #1c1c1a; --muted: #6b6b66; --line: #e2e2dc;
+    --accent: #2f6f4f; --accent-soft: #e5f0ea; --warn: #9a5b00; --warn-soft: #fbf0dc; --err: #a33a2a; --err-soft: #f8e4e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #1f1f1d; --text: #ecece8; --muted: #9b9b94; --line: #33332f;
+      --accent: #7cc4a0; --accent-soft: #1f3329; --warn: #e3b061; --warn-soft: #3a2e1a; --err: #ef8f7f; --err-soft: #3d2420;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  #drop {
+    display: block; border: 2px dashed var(--line); border-radius: 12px; background: var(--panel); padding: 40px 16px;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  #drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  #drop strong { display: block; font-size: 17px; margin-bottom: 4px; }
+  #drop span { color: var(--muted); }
+  .settings { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin: 16px 0 24px; color: var(--muted); }
+  .settings label { display: flex; gap: 6px; align-items: center; }
+  select, input[type=text] { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); }
+  input[type=text] { width: 64px; text-transform: uppercase; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  button:disabled { opacity: .5; cursor: default; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .card header { display: flex; gap: 12px; align-items: center; padding: 12px 16px; flex-wrap: wrap; }
+  .card header .name { font-weight: 600; flex: 1; min-width: 160px; overflow-wrap: anywhere; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+  .badge.ok { background: var(--accent-soft); color: var(--accent); }
+  .badge.review { background: var(--warn-soft); color: var(--warn); }
+  .badge.error { background: var(--err-soft); color: var(--err); }
+  .badge.busy { background: var(--line); color: var(--muted); }
+  .meta { padding: 0 16px 8px; color: var(--muted); font-size: 14px; }
+  .warnings { margin: 0 16px 12px; padding: 8px 12px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); font-size: 14px; }
+  .warnings.error { background: var(--err-soft); color: var(--err); }
+  .warnings ul { margin: 0; padding-left: 18px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 16px; border-top: 1px solid var(--line); white-space: nowrap; }
+  td.name { white-space: normal; min-width: 180px; }
+  th { color: var(--muted); font-weight: 500; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { font-weight: 600; }
+  details { padding: 0 16px 12px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  pre { font-size: 12px; background: var(--bg); padding: 12px; border-radius: 6px; overflow: auto; max-height: 360px; }
+  .empty { color: var(--muted); text-align: center; padding: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Receipt scanner</h1>
+  <p class="sub">Drop receipt photos to get structured JSON. Everything runs on this computer.</p>
+
+  <label id="drop" for="files">
+    <strong>Drop receipt photos here</strong>
+    <span>or click to choose · JPG, PNG, WEBP, HEIC</span>
+  </label>
+  <input id="files" type="file" accept="image/*,.heic,.heif" multiple hidden>
+
+  <div class="settings">
+    <label>Currency if not printed <input id="currency" type="text" value="USD" maxlength="3"></label>
+    <label>Dates like 03/04 are
+      <select id="dateOrder">
+        <option value="MDY">month/day (US)</option>
+        <option value="DMY">day/month</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="toolbar">
+    <span id="status" class="sub" style="margin:0"></span>
+    <button id="downloadAll" class="primary" disabled>Download all as one JSON</button>
+  </div>
+  <div id="results"><p class="empty">Scanned receipts will appear here. JSON files are also saved to the <code>output</code> folder.</p></div>
+</main>
+
+<script>
+const drop = document.getElementById("drop");
+const input = document.getElementById("files");
+const results = document.getElementById("results");
+const statusEl = document.getElementById("status");
+const downloadAllBtn = document.getElementById("downloadAll");
+const currencyEl = document.getElementById("currency");
+const dateOrderEl = document.getElementById("dateOrder");
+
+const done = [];
+const queue = [];
+let running = false;
+
+try {
+  currencyEl.value = localStorage.getItem("currency") || currencyEl.value;
+  dateOrderEl.value = localStorage.getItem("dateOrder") || dateOrderEl.value;
+} catch {}
+currencyEl.addEventListener("change", () => { try { localStorage.setItem("currency", currencyEl.value.toUpperCase()); } catch {} });
+dateOrderEl.addEventListener("change", () => { try { localStorage.setItem("dateOrder", dateOrderEl.value); } catch {} });
+
+["dragenter", "dragover"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", ev => addFiles(ev.dataTransfer.files));
+input.addEventListener("change", () => { addFiles(input.files); input.value = ""; });
+
+function addFiles(fileList) {
+  const files = [...fileList].filter(f => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name));
+  if (!files.length) return;
+  results.querySelector(".empty")?.remove();
+  for (const file of files) {
+    const card = document.createElement("section");
+    card.className = "card";
+    card.innerHTML = `<header><span class="name"></span><span class="badge busy">Waiting</span></header>`;
+    card.querySelector(".name").textContent = file.name;
+    results.prepend(card);
+    queue.push({ file, card });
+  }
+  run();
+}
+
+async function run() {
+  if (running) return;
+  running = true;
+  while (queue.length) {
+    const { file, card } = queue.shift();
+    setStatus();
+    const badge = card.querySelector(".badge");
+    badge.textContent = "Scanning…";
+    try {
+      const params = new URLSearchParams({ filename: file.name, currency: currencyEl.value || "USD", date_order: dateOrderEl.value });
+      const res = await fetch(`/scan?${params}`, { method: "POST", body: file });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      done.push(data);
+      renderResult(card, data);
+    } catch (err) {
+      badge.className = "badge error";
+      badge.textContent = "Failed";
+      const box = document.createElement("div");
+      box.className = "warnings error";
+      box.textContent = String(err.message || err);
+      card.append(box);
+    }
+  }
+  running = false;
+  setStatus();
+}
+
+function setStatus() {
+  const pending = queue.length + (running ? 1 : 0);
+  statusEl.textContent = pending ? `Scanning… ${pending} left` : (done.length ? `${done.length} scanned` : "");
+  downloadAllBtn.disabled = !done.length;
+}
+
+function money(v, currency) {
+  if (v === null || v === undefined) return "—";
+  const whole = ["XPF", "XOF", "XAF", "JPY", "KRW"].includes(currency);
+  return Number(v).toLocaleString(undefined, { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 });
+}
+
+function el(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (text !== undefined) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+
+function renderResult(card, data) {
+  const r = data.receipt;
+  const badge = card.querySelector(".badge");
+  badge.className = data.needs_review ? "badge review" : "badge ok";
+  badge.textContent = data.needs_review ? "Check this one" : "Looks right";
+
+  const header = card.querySelector("header");
+  const dl = el("button", "Download JSON");
+  dl.onclick = () => download(data.saved_as.split("/").pop(), stripForExport(data));
+  header.append(dl);
+
+  const metaBits = [r.store_name, r.purchase_date || "no date found", r.currency, `${r.items.length} items`, r.payment_method].filter(Boolean);
+  card.append(el("div", metaBits.join(" · "), "meta"));
+
+  const issues = [...data.warnings, ...r.notes];
+  if (issues.length) {
+    const box = el("div", undefined, "warnings");
+    const ul = el("ul");
+    issues.forEach(i => ul.append(el("li", i)));
+    box.append(ul);
+    card.append(box);
+  }
+
+  if (r.items.length) {
+    const wrap = el("div", undefined, "table-wrap");
+    const table = el("table");
+    table.innerHTML = `<thead><tr><th>Item</th><th>Category</th><th class="num">Qty</th><th class="num">Price</th></tr></thead>`;
+    const tbody = el("tbody");
+    for (const it of r.items) {
+      const tr = el("tr");
+      tr.append(el("td", it.name, "name"), el("td", it.category),
+        el("td", it.unit === "each" ? String(it.quantity) : `${it.quantity} ${it.unit}`, "num"),
+        el("td", money(it.total_price, r.currency), "num"));
+      tbody.append(tr);
+    }
+    const tfoot = el("tfoot");
+    const addRow = (label, value) => {
+      if (value === null || value === undefined) return;
+      const tr = el("tr");
+      const td = el("td", label); td.colSpan = 3;
+      tr.append(td, el("td", money(value, r.currency), "num"));
+      tfoot.append(tr);
+    };
+    addRow("Subtotal", r.subtotal); addRow("Tax", r.tax); addRow("Total", r.total);
+    table.append(tbody, tfoot);
+    wrap.append(table);
+    card.append(wrap);
+  }
+
+  const details = el("details");
+  details.append(el("summary", `JSON · saved to ${data.saved_as}`));
+  details.append(el("pre", JSON.stringify(stripForExport(data), null, 2)));
+  card.append(details);
+}
+
+function stripForExport(data) {
+  const { saved_as, ...rest } = data;
+  return rest;
+}
+
+function download(name, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+downloadAllBtn.onclick = () => download("receipts.json", done.map(stripForExport));
+</script>
+</body>
+</html>
